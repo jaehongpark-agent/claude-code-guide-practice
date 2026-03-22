@@ -1,4 +1,6 @@
-from ex_pipeline import add
+import pytest
+
+from ex_pipeline import add, divide
 
 
 def test_add_positive_numbers() -> None:
@@ -15,3 +17,20 @@ def test_add_zero() -> None:
 
 def test_add_mixed() -> None:
     assert add(-1, 1) == 0
+
+
+def test_divide_basic() -> None:
+    assert divide(10, 2) == 5.0
+
+
+def test_divide_negative() -> None:
+    assert divide(-10, 2) == -5.0
+
+
+def test_divide_returns_float() -> None:
+    assert divide(7, 2) == 3.5
+
+
+def test_divide_by_zero_raises_zero_division_error() -> None:
+    with pytest.raises(ZeroDivisionError, match="Cannot divide by zero"):
+        divide(1, 0)
