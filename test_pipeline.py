@@ -31,6 +31,6 @@ def test_divide_returns_float() -> None:
     assert divide(7, 2) == 3.5
 
 
-def test_divide_by_zero_raises_value_error() -> None:
-    with pytest.raises(ValueError, match="Cannot divide by zero"):
+def test_divide_by_zero_raises_zero_division_error() -> None:
+    with pytest.raises(ZeroDivisionError, match="Cannot divide by zero"):
         divide(1, 0)
