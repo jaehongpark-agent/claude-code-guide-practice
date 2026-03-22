@@ -33,47 +33,52 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          python3 - <<'PYEOF'
-          import json, os, subprocess
+          python3 << 'PYEOF'
+          import json, os, subprocess, urllib.request
 
           diff = open("/tmp/pr_diff.txt").read()
           pr_title = os.environ.get("PR_TITLE", "")
           pr_body = os.environ.get("PR_BODY", "")
 
-          prompt = f"""You are a senior code reviewer. Review the following PR diff and provide constructive feedback.
-
-          PR Title: {pr_title}
-          PR Description: {pr_body}
-
-          Diff:
-          {diff}
-
-          Please review the code focusing on:
-          1. Bugs or potential issues
-          2. Security vulnerabilities
-          3. Performance concerns
-          4. Code style and readability
-          5. Test coverage
-
-          Format your review as a clear, concise markdown comment.
-          If the code looks good, say so briefly. Do not be overly nitpicky."""
+          prompt = "\n".join([
+              "You are a senior code reviewer. Review the following PR diff and provide constructive feedback.",
+              "",
+              "PR Title: " + pr_title,
+              "PR Description: " + pr_body,
+              "",
+              "Diff:",
+              diff,
+              "",
+              "Please review the code focusing on:",
+              "1. Bugs or potential issues",
+              "2. Security vulnerabilities",
+              "3. Performance concerns",
+              "4. Code style and readability",
+              "5. Test coverage",
+              "",
+              "Format your review as a clear, concise markdown comment.",
+              "If the code looks good, say so briefly. Do not be overly nitpicky.",
+          ])
 
           payload = json.dumps({
               "model": "claude-sonnet-4-6-20250514",
               "max_tokens": 4096,
               "messages": [{"role": "user", "content": prompt}]
-          })
+          }).encode()
 
-          result = subprocess.run(
-              ["curl", "-s", "https://api.anthropic.com/v1/messages",
-               "-H", "Content-Type: application/json",
-               "-H", f"x-api-key: {os.environ['ANTHROPIC_API_KEY']}",
-               "-H", "anthropic-version: 2023-06-01",
-               "-d", payload],
-              capture_output=True, text=True
+          req = urllib.request.Request(
+              "https://api.anthropic.com/v1/messages",
+              data=payload,
+              headers={
+                  "Content-Type": "application/json",
+                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
+                  "anthropic-version": "2023-06-01",
+              },
           )
 
-          response = json.loads(result.stdout)
+          with urllib.request.urlopen(req) as resp:
+              response = json.loads(resp.read())
+
           review = response["content"][0]["text"]
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
