@@ -5,8 +5,12 @@ on:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   claude-review:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -18,27 +22,31 @@ jobs:
           fetch-depth: 0
 
       - name: Get PR diff
-        id: diff
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}
           git diff origin/${{ github.event.pull_request.base.ref }}...HEAD > /tmp/pr_diff.txt
 
-      - name: Claude Code Review
+      - name: Call Claude API
         id: review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          DIFF=$(cat /tmp/pr_diff.txt)
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_BODY="${{ github.event.pull_request.body }}"
+          python3 - <<'PYEOF'
+          import json, os, subprocess
 
-          PROMPT="You are a senior code reviewer. Review the following PR diff and provide constructive feedback.
+          diff = open("/tmp/pr_diff.txt").read()
+          pr_title = os.environ.get("PR_TITLE", "")
+          pr_body = os.environ.get("PR_BODY", "")
 
-          PR Title: ${PR_TITLE}
-          PR Description: ${PR_BODY}
+          prompt = f"""You are a senior code reviewer. Review the following PR diff and provide constructive feedback.
+
+          PR Title: {pr_title}
+          PR Description: {pr_body}
 
           Diff:
-          ${DIFF}
+          {diff}
 
           Please review the code focusing on:
           1. Bugs or potential issues
@@ -48,27 +56,31 @@ jobs:
           5. Test coverage
 
           Format your review as a clear, concise markdown comment.
-          If the code looks good, say so briefly. Do not be overly nitpicky."
+          If the code looks good, say so briefly. Do not be overly nitpicky."""
 
-          PAYLOAD=$(jq -n \
-            --arg prompt "$PROMPT" \
-            '{
-              model: "claude-sonnet-4-6-20250514",
-              max_tokens: 4096,
-              messages: [{ role: "user", content: $prompt }]
-            }')
+          payload = json.dumps({
+              "model": "claude-sonnet-4-6-20250514",
+              "max_tokens": 4096,
+              "messages": [{"role": "user", "content": prompt}]
+          })
 
-          RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
-            -H "anthropic-version: 2023-06-01" \
-            -d "$PAYLOAD")
+          result = subprocess.run(
+              ["curl", "-s", "https://api.anthropic.com/v1/messages",
+               "-H", "Content-Type: application/json",
+               "-H", f"x-api-key: {os.environ['ANTHROPIC_API_KEY']}",
+               "-H", "anthropic-version: 2023-06-01",
+               "-d", payload],
+              capture_output=True, text=True
+          )
 
-          REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text')
+          response = json.loads(result.stdout)
+          review = response["content"][0]["text"]
 
-          echo "review<<REVIEW_EOF" >> "$GITHUB_OUTPUT"
-          echo "$REVIEW" >> "$GITHUB_OUTPUT"
-          echo "REVIEW_EOF" >> "$GITHUB_OUTPUT"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("review<<REVIEW_EOF\n")
+              f.write(review + "\n")
+              f.write("REVIEW_EOF\n")
+          PYEOF
 
       - name: Post review comment
         uses: actions/github-script@v7
