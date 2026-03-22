@@ -5,9 +5,6 @@ on:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   claude-review:
     if: github.event_name == 'pull_request'
@@ -15,88 +12,24 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Get PR diff
-        run: |
-          git fetch origin ${{ github.event.pull_request.base.ref }}
-          git diff origin/${{ github.event.pull_request.base.ref }}...HEAD > /tmp/pr_diff.txt
-
-      - name: Call Claude API
-        id: review
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          python3 << 'PYEOF'
-          import json, os, subprocess, urllib.request
-
-          diff = open("/tmp/pr_diff.txt").read()
-          pr_title = os.environ.get("PR_TITLE", "")
-          pr_body = os.environ.get("PR_BODY", "")
-
-          prompt = "\n".join([
-              "You are a senior code reviewer. Review the following PR diff and provide constructive feedback.",
-              "",
-              "PR Title: " + pr_title,
-              "PR Description: " + pr_body,
-              "",
-              "Diff:",
-              diff,
-              "",
-              "Please review the code focusing on:",
-              "1. Bugs or potential issues",
-              "2. Security vulnerabilities",
-              "3. Performance concerns",
-              "4. Code style and readability",
-              "5. Test coverage",
-              "",
-              "Format your review as a clear, concise markdown comment.",
-              "If the code looks good, say so briefly. Do not be overly nitpicky.",
-          ])
-
-          payload = json.dumps({
-              "model": "claude-sonnet-4-6-20250514",
-              "max_tokens": 4096,
-              "messages": [{"role": "user", "content": prompt}]
-          }).encode()
-
-          req = urllib.request.Request(
-              "https://api.anthropic.com/v1/messages",
-              data=payload,
-              headers={
-                  "Content-Type": "application/json",
-                  "x-api-key": os.environ["ANTHROPIC_API_KEY"],
-                  "anthropic-version": "2023-06-01",
-              },
-          )
-
-          with urllib.request.urlopen(req) as resp:
-              response = json.loads(resp.read())
-
-          review = response["content"][0]["text"]
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write("review<<REVIEW_EOF\n")
-              f.write(review + "\n")
-              f.write("REVIEW_EOF\n")
-          PYEOF
-
-      - name: Post review comment
-        uses: actions/github-script@v7
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@v1
         with:
-          script: |
-            const review = process.env.REVIEW_BODY;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `## 🤖 Claude Code Review\n\n${review}`
-            });
-        env:
-          REVIEW_BODY: ${{ steps.review.outputs.review }}
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          model: claude-sonnet-4-6-20250514
+          direct_prompt: |
+            Review this PR focusing on:
+            1. Bugs or potential issues
+            2. Security vulnerabilities
+            3. Performance concerns
+            4. Code style and readability
+            5. Test coverage
+
+            Be concise. If the code looks good, say so briefly.
